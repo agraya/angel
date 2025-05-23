@@ -130,3 +130,31 @@ document.onkeydown = function (event) {
 	
 </html>
 
+
+'use strict';
+
+exports.handler = async (event) => {
+  const response = event.Records[0].cf.response;
+  const request = event.Records[0].cf.request;
+
+  const statusCode = parseInt(response.status);
+
+  if (statusCode === 403 || statusCode === 404) {
+    return {
+      status: '302',
+      statusDescription: 'Found',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: '/index.html',
+        }],
+        'cache-control': [{
+          key: 'Cache-Control',
+          value: 'no-cache',
+        }],
+      },
+    };
+  }
+
+  return response;
+};
