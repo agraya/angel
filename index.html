@@ -2,7 +2,17 @@ https://98.gigafile.nu/0507-d941285db1a3a96f7e217f189da10edf8
 https://40.gigafile.nu/0512-b021f24585af4b409800a2e37dabd2038
 <html>
 
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
 
+  // スラッシュも拡張子もない場合に index.html に書き換える
+  if (!uri.endsWith('/') && !uri.includes('.')) {
+    request.uri = uri + '/index.html';
+  }
+
+  return request;
+}
 
 
 	
