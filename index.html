@@ -31,7 +31,25 @@ function handler(event) {
 
 
 
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
 
+  // 1. すでに拡張子が含まれている（画像やCSS等）ならそのまま
+  if (uri.includes('.')) {
+    return request;
+  }
+
+  // 2. スラッシュで終わるならそのまま（CloudFrontが自動で index.html 探す）
+  if (uri.endsWith('/')) {
+    return request;
+  }
+
+  // 3. スラッシュなし・拡張子なし → index.html を補完
+  request.uri = uri + '/index.html';
+
+  return request;
+}
 
 
 
