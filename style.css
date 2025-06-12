@@ -2,6 +2,16 @@ Access-Control-Allow-Methods: GET, POST, OPTIONS
 Access-Control-Allow-Headers: Content-Type
 
 
+const copyPromises = toCopy.map(obj =>
+  s3.send(new CopyObjectCommand({
+    Bucket: PROD_BUCKET,
+    CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`, // ✅ 修正済
+    Key: obj.Key,
+  }))
+);
+
+
+
 
 
 exports.handler = async () => {
