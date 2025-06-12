@@ -17,6 +17,46 @@
 }
 
 
+import {
+  S3Client,
+  ListObjectsV2Command,
+  CopyObjectCommand
+} from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({ region: "ap-northeast-1" });
+
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+
+export const handler = async () => {
+  const devList = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
+  const prodList = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
+
+  const prodMap = {};
+  (prodList.Contents || []).forEach(o => prodMap[o.Key] = new Date(o.LastModified));
+
+  const toCopy = (devList.Contents || []).filter(obj => {
+    const prodDate = prodMap[obj.Key];
+    return !prodDate || new Date(obj.LastModified) > prodDate;
+  });
+
+  const copyPromises = toCopy.map(obj =>
+    s3.send(new CopyObjectCommand({
+      Bucket: PROD_BUCKET,
+      CopySource: `${DEV_BUCKET}/${obj.Key}`,
+      Key: obj.Key
+    }))
+  );
+
+  await Promise.all(copyPromises);
+
+  return {
+    statusCode: 200,
+    headers: { 'Access-Control-Allow-Origin': '*' },
+    body: `Synced ${toCopy.length} files.`
+  };
+};
+
 
 
 
