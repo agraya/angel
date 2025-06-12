@@ -42,11 +42,12 @@
       statusDiv.textContent = 'ドライラン中…';
       fileTable.style.display = 'none';
       syncBtn.disabled = true;
+
       try {
         const res = await fetch('/sync?dryRun=true');
-        if (!res.ok) throw new Error('APIエラー');
+        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
         const data = await res.json();
-        lastDryRunFiles = data.files || [];
+        lastDryRunFiles = Array.isArray(data.files) ? data.files : [];
 
         if (lastDryRunFiles.length === 0) {
           statusDiv.textContent = '同期するファイルはありません。';
@@ -59,11 +60,11 @@
         tbody.innerHTML = '';
         for (const file of lastDryRunFiles) {
           const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${file.key}</td>
-            <td>${new Date(file.lastModified).toLocaleString()}</td>
-            <td>${file.size}</td>
-          `;
+          const lastMod = file.lastModified ? new Date(file.lastModified) : null;
+          tr.innerHTML = 
+            '<td>' + (file.key || '') + '</td>' +
+            '<td>' + (lastMod ? lastMod.toLocaleString() : '不明') + '</td>' +
+            '<td>' + (file.size != null ? file.size : '') + '</td>';
           tbody.appendChild(tr);
         }
         fileTable.style.display = '';
@@ -83,13 +84,14 @@
       if (!confirm(`本同期を実行します。${lastDryRunFiles.length} 件のファイルが同期されます。よろしいですか？`)) {
         return;
       }
+
       statusDiv.textContent = '本同期実行中…';
       syncBtn.disabled = true;
       dryRunBtn.disabled = true;
 
       try {
         const res = await fetch('/sync', { method: 'POST' });
-        if (!res.ok) throw new Error('APIエラー');
+        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
         const data = await res.json();
 
         statusDiv.textContent = `本同期完了。同期したファイル数: ${data.syncCount}`;
@@ -105,7 +107,6 @@
   </script>
 </body>
 </html>
-
 
 
 
