@@ -1,188 +1,42 @@
-https://98.gigafile.nu/0507-d941285db1a3a96f7e217f189da10edf8
-https://40.gigafile.nu/0512-b021f24585af4b409800a2e37dabd2038
-<html>
-
-function handler(event) {
-  var request = event.request;
-  var uri = request.uri;
-
-  // スラッシュも拡張子もない場合に index.html に書き換える
-  if (!uri.endsWith('/') && !uri.includes('.')) {
-    request.uri = uri + '/index.html';
-  }
-
-  return request;
-}
-
-
-	
-	
-  <link href="style.css" rel="stylesheet" type="text/css">
-
+exports.handler = async () => {
+  const html = `
+  <!DOCTYPE html>
+  <html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>S3同期ツール</title>
+    <style>
+      body { font-family: sans-serif; padding: 2em; }
+      button { font-size: 16px; padding: 10px 20px; }
+      #status { margin-top: 1em; }
+    </style>
   </head>
-<body oncontextmenu="return false;">
+  <body>
+    <h1>S3バケット同期</h1>
+    <button onclick="sync()">同期実行</button>
+    <p id="status">未実行</p>
 
-	<div class="bloody"> <font size="4">
-		<p>
-	
-			
-			
-
-
-
-
-function handler(event) {
-  var request = event.request;
-  var uri = request.uri;
-
-  // 1. すでに拡張子が含まれている（画像やCSS等）ならそのまま
-  if (uri.includes('.')) {
-    return request;
-  }
-
-  // 2. スラッシュで終わるならそのまま（CloudFrontが自動で index.html 探す）
-  if (uri.endsWith('/')) {
-    return request;
-  }
-
-  // 3. スラッシュなし・拡張子なし → index.html を補完
-  request.uri = uri + '/index.html';
-
-  return request;
-}
-
-
-
-
-
-			
-		
-			
-test</font> 
-                   </p>
-	</div>
-	<p></p><center>
-	<div class="css-typing">
-	<p style="color:rgb(255, 255, 255);"> <br>
-	|   <a href="https://instagram.com/" target="_blank">instagram</a>
-	   |   <a href="https://twitter.com/" target="_blank">twitter</a>   |
-		<a href="https://youtube.com/" target="_blank">youtube</a>   |
-	
-
-</center>
-	</div>
-	</div>
-	<div class="animated fadeInDown">
-		<audio autoplay loop id="player">
-			<source src="music.mp3" />
-				<script>
-					var audio = document.currentScript.parentElement;
-					audio.volume = 0.2;
-				</script>
-        </audio>
-	</div>
-	
-	<body bgcolor="#000000"> 
-	
-
-</pre></font>
-</body>
-
-
-
-<script language="JavaScript">
-<!-- 
-var space = " ";
-var speed = "300";
-var pos = 0;
-var msg = "test";
-function Scroll()
-{
-document.title = msg.substring(pos, msg.length) + space + msg.substring(0,pos);
-pos++;
-if (pos > msg.length) pos = 0;
-window.setTimeout("Scroll()", speed);
-}
-Scroll();
--->
-</script>
-
-
-	
-<script type="text/javascript"> 
-<!-- 
-//Disable right click script 
-//visit http://www.rainbow.arch.scriptmania.com/scripts/ 
-var message="Sorry, right-click has been disabled"; 
-/////////////////////////////////// 
-function clickIE() {if (document.all) {(message);return false;}} 
-function clickNS(e) {if 
-(document.layers||(document.getElementById&&!document.all)) { 
-if (e.which==2||e.which==3) {(message);return false;}}} 
-if (document.layers) 
-{document.captureEvents(Event.MOUSEDOWN);document.onmousedown=clickNS;} 
-else{document.onmouseup=clickNS;document.oncontextmenu=clickIE;} 
-document.oncontextmenu=new Function("return false") 
-// --> 
-</script> 
-
-
-	
-<script language="JavaScript">
-//////////F12 disable code////////////////////////
-    document.onkeypress = function (event) {
-        event = (event || window.event);
-        if (event.keyCode == 123) {
-           //alert('No F-12');
-            return false;
+    <script>
+      async function sync() {
+        document.getElementById("status").innerText = "同期中...";
+        try {
+          const res = await fetch("/sync", { method: "POST" });
+          const text = await res.text();
+          document.getElementById("status").innerText = "完了: " + text;
+        } catch (err) {
+          document.getElementById("status").innerText = "エラー: " + err.message;
         }
-    }
-    document.onmousedown = function (event) {
-        event = (event || window.event);
-        if (event.keyCode == 123) {
-            //alert('No F-keys');
-            return false;
-        }
-    }
-document.onkeydown = function (event) {
-        event = (event || window.event);
-        if (event.keyCode == 123) {
-            //alert('No F-keys');
-            return false;
-        }
-    }
-/////////////////////end///////////////////////
-</script>
+      }
+    </script>
+  </body>
+  </html>
+  `;
 
-
-	
-</html>
-
-
-'use strict';
-
-exports.handler = async (event) => {
-  const response = event.Records[0].cf.response;
-  const request = event.Records[0].cf.request;
-
-  const statusCode = parseInt(response.status);
-
-  if (statusCode === 403 || statusCode === 404) {
-    return {
-      status: '302',
-      statusDescription: 'Found',
-      headers: {
-        location: [{
-          key: 'Location',
-          value: '/index.html',
-        }],
-        'cache-control': [{
-          key: 'Cache-Control',
-          value: 'no-cache',
-        }],
-      },
-    };
-  }
-
-  return response;
+  return {
+    statusCode: 200,
+    headers: {
+      'Content-Type': 'text/html',
+    },
+    body: html
+  };
 };
