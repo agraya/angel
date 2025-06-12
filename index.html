@@ -78,3 +78,24 @@ exports.handler = async () => {
     body: `Synced ${toCopy.length} files.`
   };
 };
+
+
+
+
+
+
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:ListBucket",
+    "s3:GetObject",
+    "s3:PutObject",
+    "s3:CopyObject"
+  ],
+  "Resource": [
+    "arn:aws:s3:::maeda-pre-test",
+    "arn:aws:s3:::maeda-pre-test/*",
+    "arn:aws:s3:::maeda-test",
+    "arn:aws:s3:::maeda-test/*"
+  ]
+}
