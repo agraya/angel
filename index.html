@@ -40,3 +40,41 @@ exports.handler = async () => {
     body: html
   };
 };
+
+
+
+
+const AWS = require('aws-sdk');
+const s3 = new AWS.S3();
+
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+
+exports.handler = async () => {
+  const devObjects = await s3.listObjectsV2({ Bucket: DEV_BUCKET }).promise();
+  const prodObjects = await s3.listObjectsV2({ Bucket: PROD_BUCKET }).promise();
+
+  const prodMap = {};
+  (prodObjects.Contents || []).forEach(o => prodMap[o.Key] = new Date(o.LastModified));
+
+  const toCopy = (devObjects.Contents || []).filter(obj => {
+    const prodDate = prodMap[obj.Key];
+    return !prodDate || new Date(obj.LastModified) > prodDate;
+  });
+
+  const copyPromises = toCopy.map(obj =>
+    s3.copyObject({
+      Bucket: PROD_BUCKET,
+      CopySource: `/${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
+      Key: obj.Key
+    }).promise()
+  );
+
+  await Promise.all(copyPromises);
+
+  return {
+    statusCode: 200,
+    headers: { 'Access-Control-Allow-Origin': '*' },
+    body: `Synced ${toCopy.length} files.`
+  };
+};
