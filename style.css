@@ -1,238 +1,121 @@
-@import url('https://fonts.googleapis.com/css?family=Share+Tech+Mono');
+exports.handler = async () => {
+  const html = `
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>S3 同期管理画面</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 2em auto; }
+    button { margin: 0.5em 0; padding: 0.5em 1em; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+    th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>S3 バケット同期管理画面</h1>
 
-body {
-	background: url(back.gif) no-repeat center center fixed;
-	-webkit-background-size: cover;
-    -moz-background-size: cover;
-    -ms-background-size: cover;
-    -o-background-size: cover;
-    background-size: cover;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    -o-user-select: none;
-    user-select: none;
-}
+  <button id="dryRunBtn">ドライラン実行（同期予定のファイルを表示）</button>
+  <button id="syncBtn" disabled>本同期実行</button>
 
-p {
-	font-family: "Courier New", Fixedsys, Monospace;
-	    font-size: 8pt;
-	margin: 0;
-	text-decoration: none;
-}
+  <div id="status"></div>
 
-a, a:visited, a:hover, a:active {
-	font-family: "Courier New", Fixedsys, Monospace;
-	text-decoration: none;
-	color: #FFFFFF;
-}
+  <table id="fileTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>ファイル名</th>
+        <th>最終更新日時</th>
+        <th>サイズ (bytes)</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-.bloody {
-	color: #FFFFFF;
-    font-size: 6pt;
-    font-family: "Courier New", Fixedsys, Monospace;
-    white-space: pre;
-    word-wrap: break-word;
-    -webkit-line-break: after-white-space;
-    display: block;
-    line-height:1.0;
-    text-align: center;
+  <script>
+    const dryRunBtn = document.getElementById("dryRunBtn");
+    const syncBtn = document.getElementById("syncBtn");
+    const statusDiv = document.getElementById("status");
+    const fileTable = document.getElementById("fileTable");
+    const tbody = fileTable.querySelector("tbody");
 
+    let lastDryRunFiles = [];
 
-.css-typing p:nth-child(1) {
-  width: 4.1em;
-  -webkit-animation: type 1s steps(40, end);
-  animation: type 1s steps(40, end);
-  -webkit-animation-fill-mode: forwards;
-  animation-fill-mode: forwards;
-}
+    dryRunBtn.onclick = async () => {
+      statusDiv.textContent = "ドライラン中…";
+      fileTable.style.display = "none";
+      syncBtn.disabled = true;
 
-.css-typing p:nth-child(2) {
-  width: 5.3em;
-  opacity: 0;
-  -webkit-animation: type 1s steps(40, end);
-  animation: type2 1s steps(40, end);
-  -webkit-animation-delay: 1s;
-  animation-delay: 1s;
-  -webkit-animation-fill-mode: forwards;
-  animation-fill-mode: forwards;
-}
+      try {
+        const res = await fetch("/sync?dryRun=true");
+        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
+        const data = await res.json();
+        lastDryRunFiles = Array.isArray(data.files) ? data.files : [];
 
-.css-typing p:nth-child(3) {
-  width: 4.5em;
-  opacity: 0;
-  -webkit-animation: type2 1s steps(40, end);
-  animation: type2 1s steps(40, end);
-  -webkit-animation-delay: 2s;
-  animation-delay: 2s;
-  -webkit-animation-fill-mode: forwards;
-  animation-fill-mode: forwards;
-}
+        if (lastDryRunFiles.length === 0) {
+          statusDiv.textContent = "同期するファイルはありません。";
+          fileTable.style.display = "none";
+          syncBtn.disabled = true;
+          return;
+        }
 
-.css-typing p:nth-child(4) {
-  width: 3em;
-  opacity: 0;
-  -webkit-animation: type2 1s steps(40, end);
-  animation: type2 1s steps(40, end);
-  -webkit-animation-delay: 3s;
-  animation-delay: 3s;
-  -webkit-animation-fill-mode: forwards;
-  animation-fill-mode: forwards;
-}
+        statusDiv.textContent = \`同期予定のファイル数: \${lastDryRunFiles.length}\`;
+        tbody.innerHTML = "";
+        for (const file of lastDryRunFiles) {
+          const tr = document.createElement("tr");
+          const lastMod = file.lastModified ? new Date(file.lastModified) : null;
+          tr.innerHTML =
+            "<td>" + (file.key || "") + "</td>" +
+            "<td>" + (lastMod ? lastMod.toLocaleString() : "不明") + "</td>" +
+            "<td>" + (file.size != null ? file.size : "") + "</td>";
+          tbody.appendChild(tr);
+        }
+        fileTable.style.display = "";
+        syncBtn.disabled = false;
+      } catch (e) {
+        statusDiv.textContent = "ドライランに失敗しました: " + e.message;
+        syncBtn.disabled = true;
+        fileTable.style.display = "none";
+      }
+    };
 
-.css-typing p:nth-child(5) {
-  width: 1.7em;
-  opacity: 0;
-  -webkit-animation: type2 1s steps(40, end);
-  animation: type2 1s steps(40, end);
-  -webkit-animation-delay: 4s;
-  animation-delay: 4s;
-  -webkit-animation-fill-mode: forwards;
-  animation-fill-mode: forwards;
-}
-	
-.blinking-cursor {
-  font-weight: 100;
-  font-size: 30px;
-  color: #2E3D48;
-  -webkit-animation: 1s blink step-end infinite;
-  -moz-animation: 1s blink step-end infinite;
-  -ms-animation: 1s blink step-end infinite;
-  -o-animation: 1s blink step-end infinite;
-  animation: 1s blink step-end infinite;
-}
+    syncBtn.onclick = async () => {
+      if (lastDryRunFiles.length === 0) {
+        alert("同期予定ファイルがありません。まずドライランを実行してください。");
+        return;
+      }
+      if (!confirm(\`本同期を実行します。\${lastDryRunFiles.length} 件のファイルが同期されます。よろしいですか？\`)) {
+        return;
+      }
 
-@keyframes "blink" {
-  from, to {
-    color: transparent;
-  }
-  50% {
-    color: black;
-  }
-}
+      statusDiv.textContent = "本同期実行中…";
+      syncBtn.disabled = true;
+      dryRunBtn.disabled = true;
 
-@-moz-keyframes blink {
-  from, to {
-    color: transparent;
-  }
-  50% {
-    color: black;
-  }
-}
+      try {
+        const res = await fetch("/sync", { method: "POST" });
+        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
+        const data = await res.json();
 
-@-webkit-keyframes "blink" {
-  from, to {
-    color: transparent;
-  }
-  50% {
-    color: black;
-  }
-}
+        statusDiv.textContent = \`本同期完了。同期したファイル数: \${data.syncCount}\`;
+        fileTable.style.display = "none";
+        lastDryRunFiles = [];
+      } catch (e) {
+        statusDiv.textContent = "本同期に失敗しました: " + e.message;
+      } finally {
+        syncBtn.disabled = true;
+        dryRunBtn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
+`;
 
-@-ms-keyframes "blink" {
-  from, to {
-    color: transparent;
-  }
-  50% {
-    color: black;
-  }
-}
-
-@-o-keyframes "blink" {
-  from, to {
-    color: transparent;
-  }
-  50% {
-    color: black;
-  }
-}
-@keyframes type {
-  0% {
-    width: 0;
-  }
-  99.9% {
-    border-right: .15em solid white;
-  }
-  100% {
-    border: none;
-  }
-}
-
-@-webkit-keyframes type {
-  0% {
-    width: 0;
-  }
-  99.9% {
-    border-right: .15em solid white;
-  }
-  100% {
-    border: none;
-  }
-}
-
-@keyframes type2 {
-  0% {
-    width: 0;
-  }
-  1% {
-    opacity: 1;
-  }
-  99.9% {
-    border-right: .15em solid white;
-  }
-  100% {
-    opacity: 1;
-    border: none;
-  }
-}
-
-@-webkit-keyframes type2 {
-  0% {
-    width: 0;
-  }
-  1% {
-    opacity: 1;
-  }
-  99.9% {
-    border-right: .15em solid white;
-  }
-  100% {
-    opacity: 1;
-    border: none;
-  }
-}
-
-@keyframes type3 {
-  0% {
-    width: 0;
-  }
-  1% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-@-webkit-keyframes type3 {
-  0% {
-    width: 0;
-  }
-  1% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-@keyframes blink {
-  50% {
-    border-color: transparent;
-  }
-}
-@-webkit-keyframes blink {
-  50% {
-    border-color: tranparent;
-  }
-}
+  return {
+    statusCode: 200,
+    headers: {
+      'Content-Type': 'text/html'
+    },
+    body: html
+  };
+};
