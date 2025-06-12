@@ -10,53 +10,60 @@ const DEV_BUCKET = process.env.DEV_BUCKET;
 const PROD_BUCKET = process.env.PROD_BUCKET;
 
 export const handler = async (event) => {
-  // event.queryStringParameters?.dryRun が "true" の場合はコピーしない
+  try {
+    // HTTPメソッド判定
+    const method = event.httpMethod || "GET";
 
-  const dryRun = event.queryStringParameters?.dryRun === "true";
+    const devList = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
+    const prodList = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
 
-  const devList = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
-  const prodList = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
+    const prodMap = {};
+    (prodList.Contents || []).forEach(o => prodMap[o.Key] = new Date(o.LastModified));
 
-  const prodMap = {};
-  (prodList.Contents || []).forEach(o => prodMap[o.Key] = new Date(o.LastModified));
+    // 同期予定のファイルを取得
+    const toCopy = (devList.Contents || []).filter(obj => {
+      const prodDate = prodMap[obj.Key];
+      return !prodDate || new Date(obj.LastModified) > prodDate;
+    });
 
-  // 同期すべきファイルリストを取得
-  const toCopy = (devList.Contents || []).filter(obj => {
-    const prodDate = prodMap[obj.Key];
-    return !prodDate || new Date(obj.LastModified) > prodDate;
-  });
+    if (method === "POST") {
+      // 本同期（コピー実行）
+      const copyPromises = toCopy.map(obj =>
+        s3.send(new CopyObjectCommand({
+          Bucket: PROD_BUCKET,
+          CopySource: `${DEV_BUCKET}/${obj.Key}`,
+          Key: obj.Key
+        }))
+      );
+      await Promise.all(copyPromises);
+    }
 
-  if (!dryRun) {
-    // コピー実行
-    const copyPromises = toCopy.map(obj =>
-      s3.send(new CopyObjectCommand({
-        Bucket: PROD_BUCKET,
-        CopySource: `${DEV_BUCKET}/${obj.Key}`,
-        Key: obj.Key
-      }))
-    );
-    await Promise.all(copyPromises);
+    // レスポンスの共通部分
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        dryRun: method !== "POST",
+        syncCount: toCopy.length,
+        files: toCopy.map(obj => ({
+          key: obj.Key,
+          lastModified: obj.LastModified,
+          size: obj.Size
+        }))
+      })
+    };
+
+  } catch (error) {
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ message: error.message || 'Internal Server Error' })
+    };
   }
-
-  return {
-    statusCode: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      dryRun,
-      syncCount: toCopy.length,
-      files: toCopy.map(obj => ({
-        key: obj.Key,
-        lastModified: obj.LastModified,
-        size: obj.Size
-      }))
-    })
-  };
 };
-
-
 
 
 
