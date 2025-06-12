@@ -110,3 +110,26 @@ exports.handler = async () => {
   },
   "body": ""
 }
+
+
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowSpecificIP",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:ap-northeast-1:123456789012:your-api-id/*",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": [
+            "203.0.113.10/32",   // ← 許可したいIPアドレス
+            "198.51.100.0/24"    // ← 必要に応じて範囲も可
+          ]
+        }
+      }
+    }
+  ]
+}
