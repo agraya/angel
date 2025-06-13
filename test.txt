@@ -1,0 +1,72 @@
+// sync.mjs
+import { S3Client, ListObjectsV2Command, CopyObjectCommand } from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({});
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+
+export const handler = async (event) => {
+  const query = event.queryStringParameters || {};
+  const dryRun = query.dryRun === 'true';
+  const exclude = (query.exclude || '').split(',').map(x => x.trim()).filter(Boolean);
+
+  const listObjects = async (Bucket) => {
+    let Contents = [];
+    let ContinuationToken;
+    do {
+      const res = await s3.send(new ListObjectsV2Command({ Bucket, ContinuationToken }));
+      Contents = Contents.concat(res.Contents || []);
+      ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+    return Contents;
+  };
+
+  const devObjects = await listObjects(DEV_BUCKET);
+  const prodObjects = await listObjects(PROD_BUCKET);
+
+  const prodMap = {};
+  for (const o of prodObjects) {
+    prodMap[o.Key] = new Date(o.LastModified);
+  }
+
+  const toCopy = devObjects.filter(obj => {
+    if (exclude.some(prefix => obj.Key.startsWith(prefix))) return false;
+    const prodDate = prodMap[obj.Key];
+    return !prodDate || new Date(obj.LastModified) > prodDate;
+  });
+
+  if (dryRun) {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        files: toCopy.map(obj => ({
+          key: obj.Key,
+          lastModified: obj.LastModified,
+          size: obj.Size
+        }))
+      })
+    };
+  }
+
+  // 本同期
+  const copyPromises = toCopy.map(obj =>
+    s3.send(new CopyObjectCommand({
+      Bucket: PROD_BUCKET,
+      CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
+      Key: obj.Key
+    }))
+  );
+
+  await Promise.all(copyPromises);
+
+  return {
+    statusCode: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*'
+    },
+    body: JSON.stringify({ syncCount: toCopy.length })
+  };
+};
