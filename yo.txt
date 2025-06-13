@@ -1,0 +1,173 @@
+<!-- ボタンなどは同じ -->
+<table id="fileTable" style="display:none;">
+  <thead>
+    <tr>
+      <th>除外</th><th>ファイル名</th><th>最終更新日時</th><th>サイズ</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+  let lastDryRunFiles = [];
+  let excludedKeys = new Set();
+
+  function renderFileTable(files) {
+    tbody.innerHTML = '';
+    for (const file of files) {
+      const tr = document.createElement('tr');
+      const lastMod = file.lastModified ? new Date(file.lastModified) : null;
+      const key = file.key;
+
+      const checked = excludedKeys.has(key) ? 'checked' : '';
+      tr.innerHTML = `
+        <td><input type="checkbox" class="excludeCheck" data-key="${key}" ${checked}></td>
+        <td>${key}</td>
+        <td>${lastMod ? lastMod.toLocaleString() : '不明'}</td>
+        <td>${file.size ?? ''}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    // イベント追加
+    document.querySelectorAll('.excludeCheck').forEach(chk => {
+      chk.addEventListener('change', e => {
+        const k = e.target.dataset.key;
+        if (e.target.checked) {
+          excludedKeys.add(k);
+        } else {
+          excludedKeys.delete(k);
+        }
+      });
+    });
+  }
+
+  dryRunBtn.onclick = async () => {
+    statusDiv.textContent = 'ドライラン中…';
+    fileTable.style.display = 'none';
+    syncBtn.disabled = true;
+
+    const query = [...excludedKeys].map(k => 'exclude=' + encodeURIComponent(k)).join('&');
+    const url = '/sync?dryRun=true' + (query ? '&' + query : '');
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+      const data = await res.json();
+      lastDryRunFiles = Array.isArray(data.files) ? data.files : [];
+
+      if (lastDryRunFiles.length === 0) {
+        statusDiv.textContent = '同期するファイルはありません。';
+        syncBtn.disabled = true;
+        return;
+      }
+
+      statusDiv.textContent = `同期予定のファイル数: ${lastDryRunFiles.length}`;
+      fileTable.style.display = '';
+      syncBtn.disabled = false;
+      renderFileTable(lastDryRunFiles);
+    } catch (e) {
+      statusDiv.textContent = 'ドライラン失敗: ' + e.message;
+    }
+  };
+
+  syncBtn.onclick = async () => {
+    if (!confirm(`本同期を実行します。${lastDryRunFiles.length} 件のファイルが対象です。続行しますか？`)) return;
+
+    statusDiv.textContent = '同期中…';
+    const excludeBody = { exclude: [...excludedKeys] };
+
+    try {
+      const res = await fetch('/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(excludeBody),
+      });
+      if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+      const data = await res.json();
+      statusDiv.textContent = `同期完了: ${data.syncCount} 件同期しました。`;
+      fileTable.style.display = 'none';
+      lastDryRunFiles = [];
+      excludedKeys.clear();
+    } catch (e) {
+      statusDiv.textContent = '同期失敗: ' + e.message;
+    }
+  };
+</script>
+
+
+
+
+
+
+
+
+import { S3Client, ListObjectsV2Command, CopyObjectCommand } from "@aws-sdk/client-s3";
+
+const s3 = new S3Client({});
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+
+export const handler = async (event) => {
+  const method = event.requestContext.http.method;
+  const query = event.queryStringParameters || {};
+  const dryRun = query.dryRun === 'true';
+
+  let excludeKeys = [];
+
+  if (method === 'POST' && event.body) {
+    try {
+      const body = JSON.parse(event.body);
+      excludeKeys = Array.isArray(body.exclude) ? body.exclude : [];
+    } catch (e) {}
+  }
+
+  if (method === 'GET') {
+    // ドライラン：クエリにも除外パラメータ対応
+    const params = new URLSearchParams(event.rawQueryString || '');
+    excludeKeys = params.getAll('exclude');
+  }
+
+  // リスト取得
+  const devList = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
+  const prodList = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
+
+  const prodMap = {};
+  for (const o of prodList.Contents ?? []) {
+    prodMap[o.Key] = new Date(o.LastModified);
+  }
+
+  const toSync = (devList.Contents ?? []).filter(obj => {
+    if (excludeKeys.includes(obj.Key)) return false;
+    const prodDate = prodMap[obj.Key];
+    return !prodDate || new Date(obj.LastModified) > prodDate;
+  });
+
+  if (dryRun) {
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ files: toSync.map(f => ({
+        key: f.Key,
+        lastModified: f.LastModified,
+        size: f.Size
+      })) })
+    };
+  }
+
+  // 本同期
+  const copyPromises = toSync.map(f =>
+    s3.send(new CopyObjectCommand({
+      Bucket: PROD_BUCKET,
+      Key: f.Key,
+      CopySource: `${DEV_BUCKET}/${encodeURIComponent(f.Key)}`
+    }))
+  );
+
+  await Promise.all(copyPromises);
+
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    body: JSON.stringify({ syncCount: toSync.length })
+  };
+};
