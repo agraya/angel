@@ -1,110 +1,85 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <title>S3 同期管理画面</title>
-  <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 2em auto; }
-    button { margin: 0.5em 0; padding: 0.5em 1em; }
-    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
-    th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }
-  </style>
-</head>
-<body>
-  <h1>S3 バケット同期管理画面</h1>
+import {
+  S3Client,
+  ListObjectsV2Command,
+  CopyObjectCommand
+} from "@aws-sdk/client-s3";
 
-  <button id="dryRunBtn">ドライラン実行（同期予定のファイルを表示）</button>
-  <button id="syncBtn" disabled>本同期実行</button>
+import {
+  SESClient,
+  SendEmailCommand
+} from "@aws-sdk/client-ses";
 
-  <div id="status"></div>
+const s3 = new S3Client({});
+const ses = new SESClient({});
 
-  <table id="fileTable" style="display:none;">
-    <thead>
-      <tr>
-        <th>ファイル名</th>
-        <th>最終更新日時</th>
-        <th>サイズ (bytes)</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
 
-  <script>
-    const dryRunBtn = document.getElementById("dryRunBtn");
-    const syncBtn = document.getElementById("syncBtn");
-    const statusDiv = document.getElementById("status");
-    const fileTable = document.getElementById("fileTable");
-    const tbody = fileTable.querySelector("tbody");
+export const handler = async (event) => {
+  const method = event.requestContext.http.method;
+  const path = event.rawPath;
 
-    let lastDryRunFiles = [];
+  // POST /sync のときだけ処理
+  if (method === 'POST' && path === '/sync') {
+    // S3のオブジェクト一覧を取得
+    const devObjects = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
+    const prodObjects = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
 
-    dryRunBtn.onclick = async () => {
-      statusDiv.textContent = "ドライラン中…";
-      fileTable.style.display = "none";
-      syncBtn.disabled = true;
+    const devFiles = devObjects.Contents || [];
+    const prodMap = new Map((prodObjects.Contents || []).map(obj => [obj.Key, new Date(obj.LastModified)]));
 
-      try {
-        const res = await fetch("/sync?dryRun=true");
-        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
-        const data = await res.json();
-        lastDryRunFiles = Array.isArray(data.files) ? data.files : [];
+    // 差分抽出
+    const toSync = devFiles.filter(obj => {
+      const prodLastModified = prodMap.get(obj.Key);
+      return !prodLastModified || new Date(obj.LastModified) > prodLastModified;
+    });
 
-        if (lastDryRunFiles.length === 0) {
-          statusDiv.textContent = "同期するファイルはありません。";
-          fileTable.style.display = "none";
-          syncBtn.disabled = true;
-          return;
-        }
+    const copiedKeys = [];
 
-        statusDiv.textContent = \`同期予定のファイル数: \${lastDryRunFiles.length}\`;
-        tbody.innerHTML = "";
-        for (const file of lastDryRunFiles) {
-          const tr = document.createElement("tr");
-          const lastMod = file.lastModified ? new Date(file.lastModified) : null;
-          tr.innerHTML =
-            "<td>" + (file.key || "") + "</td>" +
-            "<td>" + (lastMod ? lastMod.toLocaleString() : "不明") + "</td>" +
-            "<td>" + (file.size != null ? file.size : "") + "</td>";
-          tbody.appendChild(tr);
-        }
-        fileTable.style.display = "";
-        syncBtn.disabled = false;
-      } catch (e) {
-        statusDiv.textContent = "ドライランに失敗しました: " + e.message;
-        syncBtn.disabled = true;
-        fileTable.style.display = "none";
-      }
-    };
+    for (const file of toSync) {
+      await s3.send(new CopyObjectCommand({
+        Bucket: PROD_BUCKET,
+        Key: file.Key,
+        CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`
+      }));
+      copiedKeys.push(file.Key);
+    }
 
-    syncBtn.onclick = async () => {
-      if (lastDryRunFiles.length === 0) {
-        alert("同期予定ファイルがありません。まずドライランを実行してください。");
-        return;
-      }
-      if (!confirm(\`本同期を実行します。\${lastDryRunFiles.length} 件のファイルが同期されます。よろしいですか？\`)) {
-        return;
-      }
+    // 同期後にメール送信
+    if (NOTIFY_EMAIL) {
+      const subject = `S3同期完了 (${copiedKeys.length} 件)`;
+      const bodyText = copiedKeys.length === 0
+        ? `同期対象のファイルはありませんでした。`
+        : `以下のファイルが同期されました：\n\n${copiedKeys.join('\n')}`;
 
-      statusDiv.textContent = "本同期実行中…";
-      syncBtn.disabled = true;
-      dryRunBtn.disabled = true;
+      const emailParams = {
+        Destination: { ToAddresses: [NOTIFY_EMAIL] },
+        Message: {
+          Subject: { Data: subject },
+          Body: {
+            Text: { Data: bodyText }
+          }
+        },
+        Source: NOTIFY_EMAIL
+      };
 
       try {
-        const res = await fetch("/sync", { method: "POST" });
-        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
-        const data = await res.json();
-
-        statusDiv.textContent = \`本同期完了。同期したファイル数: \${data.syncCount}\`;
-        fileTable.style.display = "none";
-        lastDryRunFiles = [];
-      } catch (e) {
-        statusDiv.textContent = "本同期に失敗しました: " + e.message;
-      } finally {
-        syncBtn.disabled = true;
-        dryRunBtn.disabled = false;
+        await ses.send(new SendEmailCommand(emailParams));
+      } catch (err) {
+        console.error("メール送信に失敗:", err);
       }
+    }
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ syncCount: copiedKeys.length })
     };
-  </script>
-</body>
-</html>
-`;
+  }
+
+  return {
+    statusCode: 404,
+    body: 'Not Found'
+  };
+};
