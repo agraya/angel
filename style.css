@@ -14,22 +14,21 @@ const ses = new SESClient({});
 
 const DEV_BUCKET = process.env.DEV_BUCKET;
 const PROD_BUCKET = process.env.PROD_BUCKET;
-const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
+const FROM_EMAIL = process.env.NOTIFY_FROM_EMAIL;
+const TO_EMAIL = process.env.NOTIFY_TO_EMAIL;
 
 export const handler = async (event) => {
   const method = event.requestContext.http.method;
   const path = event.rawPath;
 
-  // POST /sync のときだけ処理
+  // POST /sync の処理
   if (method === 'POST' && path === '/sync') {
-    // S3のオブジェクト一覧を取得
     const devObjects = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
     const prodObjects = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
 
     const devFiles = devObjects.Contents || [];
     const prodMap = new Map((prodObjects.Contents || []).map(obj => [obj.Key, new Date(obj.LastModified)]));
 
-    // 差分抽出
     const toSync = devFiles.filter(obj => {
       const prodLastModified = prodMap.get(obj.Key);
       return !prodLastModified || new Date(obj.LastModified) > prodLastModified;
@@ -46,34 +45,37 @@ export const handler = async (event) => {
       copiedKeys.push(file.Key);
     }
 
-    // 同期後にメール送信
-    if (NOTIFY_EMAIL) {
-      const subject = `S3同期完了 (${copiedKeys.length} 件)`;
+    // ✅ メール通知
+    if (FROM_EMAIL && TO_EMAIL) {
+      const subject = `S3同期完了: ${copiedKeys.length} 件のファイルが同期されました`;
       const bodyText = copiedKeys.length === 0
-        ? `同期対象のファイルはありませんでした。`
+        ? '同期対象のファイルはありませんでした。'
         : `以下のファイルが同期されました：\n\n${copiedKeys.join('\n')}`;
 
       const emailParams = {
-        Destination: { ToAddresses: [NOTIFY_EMAIL] },
+        Source: FROM_EMAIL,
+        Destination: { ToAddresses: [TO_EMAIL] },
         Message: {
           Subject: { Data: subject },
           Body: {
             Text: { Data: bodyText }
           }
-        },
-        Source: NOTIFY_EMAIL
+        }
       };
 
       try {
         await ses.send(new SendEmailCommand(emailParams));
       } catch (err) {
-        console.error("メール送信に失敗:", err);
+        console.error("メール送信エラー:", err);
       }
     }
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
       body: JSON.stringify({ syncCount: copiedKeys.length })
     };
   }
