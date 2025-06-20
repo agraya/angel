@@ -18,10 +18,11 @@ const FROM_EMAIL = process.env.NOTIFY_FROM_EMAIL;
 const TO_EMAIL = process.env.NOTIFY_TO_EMAIL;
 
 export const handler = async (event) => {
-  const method = event.requestContext.http.method;
-  const path = event.rawPath;
+  const method = event.httpMethod; // ← 修正ポイント
+  const path = event.path;
 
-  // POST /sync の処理
+  let toSync = [];
+
   if (method === 'POST' && path === '/sync') {
     const devObjects = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
     const prodObjects = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
@@ -29,7 +30,7 @@ export const handler = async (event) => {
     const devFiles = devObjects.Contents || [];
     const prodMap = new Map((prodObjects.Contents || []).map(obj => [obj.Key, new Date(obj.LastModified)]));
 
-    const toSync = devFiles.filter(obj => {
+    toSync = devFiles.filter(obj => {
       const prodLastModified = prodMap.get(obj.Key);
       return !prodLastModified || new Date(obj.LastModified) > prodLastModified;
     });
@@ -45,7 +46,7 @@ export const handler = async (event) => {
       copiedKeys.push(file.Key);
     }
 
-    // ✅ メール通知
+    // メール送信
     if (FROM_EMAIL && TO_EMAIL) {
       const subject = `S3同期完了: ${copiedKeys.length} 件のファイルが同期されました`;
       const bodyText = copiedKeys.length === 0
