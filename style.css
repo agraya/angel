@@ -17,61 +17,98 @@ const PROD_BUCKET = process.env.PROD_BUCKET;
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
 
 export const handler = async (event) => {
+  const method = event.httpMethod;
+  const path = event.path;
+  const isDryRun = event.queryStringParameters && event.queryStringParameters.dryRun === 'true';
+
+  console.log('method:', method, 'path:', path, 'dryRun:', isDryRun);
+
+  if (path !== '/tools/sync') {
+    return {
+      statusCode: 404,
+      body: 'Not Found',
+    };
+  }
+
   try {
+    // バケット内ファイル一覧取得
     const devList = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
     const prodList = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
 
     const devFiles = devList.Contents || [];
     const prodMap = new Map((prodList.Contents || []).map(obj => [obj.Key, new Date(obj.LastModified)]));
 
+    // 差分ファイルを抽出
     const toCopy = devFiles.filter(obj => {
       const prodTime = prodMap.get(obj.Key);
       return !prodTime || new Date(obj.LastModified) > prodTime;
     });
 
-    const copiedKeys = [];
-
-    for (const file of toCopy) {
-      await s3.send(new CopyObjectCommand({
-        Bucket: PROD_BUCKET,
-        Key: file.Key,
-        CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`
-      }));
-      copiedKeys.push(file.Key);
+    if (method === 'GET' && isDryRun) {
+      // ドライランは同期予定ファイル一覧のみ返す
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({
+          files: toCopy.map(f => ({
+            key: f.Key,
+            size: f.Size,
+            lastModified: f.LastModified,
+          })),
+        }),
+      };
     }
 
-    // ✅ メール送信（同期後）
-    if (NOTIFY_EMAIL && copiedKeys.length > 0) {
-      const subject = `S3同期完了 - ${copiedKeys.length} 件のファイルが同期されました`;
-      const bodyText = copiedKeys.join('\n');
+    if (method === 'POST') {
+      // 本同期処理
+      const copiedKeys = [];
 
-      const emailParams = {
-        Source: NOTIFY_EMAIL,
-        Destination: { ToAddresses: [NOTIFY_EMAIL] },
-        Message: {
-          Subject: { Data: subject },
-          Body: { Text: { Data: bodyText } }
-        }
-      };
-
-      try {
-        await ses.send(new SendEmailCommand(emailParams));
-      } catch (err) {
-        console.error('メール送信エラー:', err);
+      for (const file of toCopy) {
+        await s3.send(new CopyObjectCommand({
+          Bucket: PROD_BUCKET,
+          Key: file.Key,
+          CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`,
+        }));
+        copiedKeys.push(file.Key);
       }
+
+      // メール送信（ファイルがあれば）
+      if (NOTIFY_EMAIL && copiedKeys.length > 0) {
+        const subject = `S3同期完了 - ${copiedKeys.length}件のファイルが同期されました`;
+        const bodyText = copiedKeys.join('\n');
+
+        try {
+          await ses.send(new SendEmailCommand({
+            Source: NOTIFY_EMAIL,
+            Destination: { ToAddresses: [NOTIFY_EMAIL] },
+            Message: {
+              Subject: { Data: subject },
+              Body: { Text: { Data: bodyText } },
+            },
+          }));
+        } catch (emailError) {
+          console.error('メール送信エラー:', emailError);
+          // メール送信失敗でも同期自体は成功として扱う
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ syncCount: copiedKeys.length }),
+      };
     }
 
     return {
-      statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ syncCount: copiedKeys.length })
+      statusCode: 405,
+      body: 'Method Not Allowed',
     };
   } catch (err) {
     console.error('同期処理エラー:', err);
     return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: '同期に失敗しました' })
+      body: JSON.stringify({ error: '同期処理に失敗しました' }),
     };
   }
 };
