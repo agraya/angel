@@ -1,5 +1,5 @@
-const { S3Client, ListObjectsV2Command, CopyObjectCommand } = require("@aws-sdk/client-s3");
-const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+import { S3Client, ListObjectsV2Command, CopyObjectCommand } from "@aws-sdk/client-s3";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 const s3 = new S3Client({ region: "ap-northeast-1" });
 const ses = new SESClient({ region: "ap-northeast-1" });
@@ -8,7 +8,7 @@ const DEV_BUCKET = process.env.DEV_BUCKET;
 const PROD_BUCKET = process.env.PROD_BUCKET;
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     const devRes = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
     const prodRes = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
@@ -31,7 +31,6 @@ exports.handler = async (event) => {
 
     await Promise.all(copyPromises);
 
-    // メール送信（同期ファイル一覧）
     if (NOTIFY_EMAIL && toCopy.length > 0) {
       const subject = `S3同期完了 - ${toCopy.length} 件のファイルが同期されました`;
       const bodyText = toCopy.map(f => f.Key).join('\n');
