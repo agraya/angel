@@ -3,7 +3,6 @@ import {
   ListObjectsV2Command,
   CopyObjectCommand
 } from "@aws-sdk/client-s3";
-
 import {
   SESClient,
   SendEmailCommand
@@ -18,71 +17,85 @@ const FROM_EMAIL = process.env.NOTIFY_FROM_EMAIL;
 const TO_EMAIL = process.env.NOTIFY_TO_EMAIL;
 
 export const handler = async (event) => {
-  const method = event.httpMethod; // ← 修正ポイント
+  const method = event.httpMethod;
   const path = event.path;
+  const isDryRun = event.queryStringParameters?.dryRun === 'true';
 
-  let toSync = [];
+  if (path === '/tools/sync') {
+    try {
+      // S3オブジェクト一覧の取得
+      const devObjects = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
+      const prodObjects = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
 
-  if (method === 'POST' && path === '/sync') {
-    const devObjects = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
-    const prodObjects = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
+      const devFiles = devObjects.Contents || [];
+      const prodMap = new Map((prodObjects.Contents || []).map(o => [o.Key, new Date(o.LastModified)]));
 
-    const devFiles = devObjects.Contents || [];
-    const prodMap = new Map((prodObjects.Contents || []).map(obj => [obj.Key, new Date(obj.LastModified)]));
+      const toSync = devFiles.filter(obj => {
+        const prodDate = prodMap.get(obj.Key);
+        return !prodDate || new Date(obj.LastModified) > prodDate;
+      });
 
-    toSync = devFiles.filter(obj => {
-      const prodLastModified = prodMap.get(obj.Key);
-      return !prodLastModified || new Date(obj.LastModified) > prodLastModified;
-    });
-
-    const copiedKeys = [];
-
-    for (const file of toSync) {
-      await s3.send(new CopyObjectCommand({
-        Bucket: PROD_BUCKET,
-        Key: file.Key,
-        CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`
-      }));
-      copiedKeys.push(file.Key);
-    }
-
-    // メール送信
-    if (FROM_EMAIL && TO_EMAIL) {
-      const subject = `S3同期完了: ${copiedKeys.length} 件のファイルが同期されました`;
-      const bodyText = copiedKeys.length === 0
-        ? '同期対象のファイルはありませんでした。'
-        : `以下のファイルが同期されました：\n\n${copiedKeys.join('\n')}`;
-
-      const emailParams = {
-        Source: FROM_EMAIL,
-        Destination: { ToAddresses: [TO_EMAIL] },
-        Message: {
-          Subject: { Data: subject },
-          Body: {
-            Text: { Data: bodyText }
-          }
-        }
-      };
-
-      try {
-        await ses.send(new SendEmailCommand(emailParams));
-      } catch (err) {
-        console.error("メール送信エラー:", err);
+      if (method === 'GET' && isDryRun) {
+        // ドライラン：同期対象ファイル一覧のみ返す
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({
+            files: toSync.map(obj => ({
+              key: obj.Key,
+              size: obj.Size,
+              lastModified: obj.LastModified
+            }))
+          })
+        };
       }
-    }
 
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      },
-      body: JSON.stringify({ syncCount: copiedKeys.length })
-    };
+      if (method === 'POST') {
+        const copiedKeys = [];
+
+        for (const file of toSync) {
+          await s3.send(new CopyObjectCommand({
+            Bucket: PROD_BUCKET,
+            Key: file.Key,
+            CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`
+          }));
+          copiedKeys.push(file.Key);
+        }
+
+        // メール通知送信
+        if (FROM_EMAIL && TO_EMAIL) {
+          const subject = `S3同期完了（${copiedKeys.length}件）`;
+          const bodyText = copiedKeys.length === 0
+            ? '同期対象のファイルはありませんでした。'
+            : `以下のファイルが同期されました：\n\n${copiedKeys.join('\n')}`;
+
+          await ses.send(new SendEmailCommand({
+            Source: FROM_EMAIL,
+            Destination: { ToAddresses: [TO_EMAIL] },
+            Message: {
+              Subject: { Data: subject },
+              Body: { Text: { Data: bodyText } }
+            }
+          }));
+        }
+
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ syncCount: copiedKeys.length })
+        };
+      }
+
+      return { statusCode: 405, body: 'Method Not Allowed' };
+    } catch (err) {
+      console.error('同期処理エラー:', err);
+      return {
+        statusCode: 500,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ error: '同期処理に失敗しました。' })
+      };
+    }
   }
 
-  return {
-    statusCode: 404,
-    body: 'Not Found'
-  };
+  return { statusCode: 404, body: 'Not Found' };
 };
