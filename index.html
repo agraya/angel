@@ -6,6 +6,7 @@ aws route53 list-resource-record-sets \
 
 const s3 = new S3Client({ region: "ap-northeast-1" });
 const ses = new SESClient({ region: "ap-northeast-1" });
+const bodyText = toCopy.map(f => f.Key).join('\n');
 
 
 
