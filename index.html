@@ -42,7 +42,17 @@ const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
       }
 
 
-
+    if (method === 'POST') {
+      // 本同期処理：差分ファイルをコピー
+      const copiedFiles = [];
+      for (const file of toCopy) {
+        await s3.send(new CopyObjectCommand({
+          Bucket: PROD_BUCKET,
+          Key: file.Key,
+          CopySource: `${DEV_BUCKET}/${encodeURIComponent(file.Key)}`,
+        }));
+        copiedFiles.push(file.Key);
+      }
 
 
 
