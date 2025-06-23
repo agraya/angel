@@ -4,6 +4,52 @@ aws route53 list-resource-record-sets \
 | jq -r '.ResourceRecordSets[] | select(.Type == "A" or .Type == "CNAME") | [.Name, .Type, (.ResourceRecords[]?.Value // "—")] | @tsv' \
 > records_ac.tsv
 
+
+
+
+
+
+    // メール送信（同期ファイル一覧）
+    if (NOTIFY_EMAIL && toCopy.length > 0) {
+      const subject = `S3同期完了 - ${toCopy.length} 件のファイルが同期されました`;
+      const bodyText = toCopy.map(f => f.Key).join('\n');
+
+      try {
+        await ses.send(new SendEmailCommand({
+          Source: NOTIFY_EMAIL,
+          Destination: { ToAddresses: [NOTIFY_EMAIL] },
+          Message: {
+            Subject: { Data: subject },
+            Body: { Text: { Data: bodyText } }
+          }
+        }));
+      } catch (emailErr) {
+        console.error('メール送信エラー:', emailErr);
+      }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
