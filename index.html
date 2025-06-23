@@ -1,8 +1,8 @@
 aws route53 list-resource-record-sets \
   --hosted-zone-id ZXXXXXXXXXXXXXX \
   --output json \
-| jq -r '.ResourceRecordSets[] | [.Name, .Type, (.ResourceRecords[]?.Value // "—")] | @tsv' \
-> records.tsv
+| jq -r '.ResourceRecordSets[] | select(.Type == "A" or .Type == "CNAME") | [.Name, .Type, (.ResourceRecords[]?.Value // "—")] | @tsv' \
+> records_ac.tsv
 
 <!DOCTYPE html>
 <html lang="ja">
