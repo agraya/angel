@@ -8,34 +8,13 @@ aws route53 list-resource-record-sets \
 
 
 
+import {
+  SESClient,
+  SendEmailCommand
+} from '@aws-sdk/client-ses';
 
-    // メール送信（同期ファイル一覧）
-    if (NOTIFY_EMAIL && toCopy.length > 0) {
-      const subject = `S3同期完了 - ${toCopy.length} 件のファイルが同期されました`;
-      const bodyText = toCopy.map(f => f.Key).join('\n');
-
-      try {
-        await ses.send(new SendEmailCommand({
-          Source: NOTIFY_EMAIL,
-          Destination: { ToAddresses: [NOTIFY_EMAIL] },
-          Message: {
-            Subject: { Data: subject },
-            Body: { Text: { Data: bodyText } }
-          }
-        }));
-      } catch (emailErr) {
-        console.error('メール送信エラー:', emailErr);
-      }
-    }
-
-
-
-
-
-const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
-
-const s3 = new S3Client({ region: "ap-northeast-1" });
-const ses = new SESClient({ region: "ap-northeast-1" });
+const s3 = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
+const ses = new SESClient({ region: process.env.AWS_REGION || 'ap-northeast-1' });
 
 const DEV_BUCKET = process.env.DEV_BUCKET;
 const PROD_BUCKET = process.env.PROD_BUCKET;
@@ -43,10 +22,24 @@ const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL;
 
 
 
+     // メール送信
+      if (NOTIFY_EMAIL && copiedFiles.length > 0) {
+        const subject = `S3同期完了 - ${copiedFiles.length} 件のファイルが同期されました`;
+        const bodyText = copiedFiles.join('\n');
 
-
-
-
+        try {
+          await ses.send(new SendEmailCommand({
+            Source: NOTIFY_EMAIL,
+            Destination: { ToAddresses: [NOTIFY_EMAIL] },
+            Message: {
+              Subject: { Data: subject },
+              Body: { Text: { Data: bodyText } },
+            },
+          }));
+        } catch (emailErr) {
+          console.error('メール送信エラー:', emailErr);
+        }
+      }
 
 
 
