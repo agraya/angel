@@ -1,13 +1,22 @@
-aws route53 list-resource-record-sets \
-  --hosted-zone-id ZXXXXXXXXXXXXXX \
-  --output json \
-| jq -r '.ResourceRecordSets[] | select(.Type == "A" or .Type == "CNAME") | [.Name, .Type, (.ResourceRecords[]?.Value // "—")] | @tsv' \
-> records_ac.tsv
+#!/bin/bash
 
-const s3 = new S3Client({ region: "ap-northeast-1" });
-const ses = new SESClient({ region: "ap-northeast-1" });
-const bodyText = toCopy.map(f => f.Key).join('\n');
+# list.txt に記載されたURLまたはドメインを1行ずつ処理
+while IFS= read -r domain; do
+    if [[ -z "$domain" ]]; then
+        continue
+    fi
 
+    echo "Checking: $domain"
+
+    # OpenSSLで証明書の有効期限取得（curlは証明書詳細の取得には不向きなためopenssl使用）
+    end_date=$(echo | \
+        timeout 10 openssl s_client -servername "$domain" -connect "$domain:443" 2>/dev/null | \
+        openssl x509 -noout -enddate 2>/dev/null)
+
+    if [[ $? -ne 0 || -z "$end_date" ]]; then
+        echo "  → Failed to retrieve certificate info (timeout or connection error)"
+        continue
+    fi
 
 
 
