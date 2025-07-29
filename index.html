@@ -1,136 +1,144 @@
-import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>S3 バケット同期ツール</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 p-6">
+  <h1 class="text-2xl font-bold mb-4">S3 バケット同期ツール</h1>
 
-const s3 = new S3Client({});
-const ses = new SESClient({ region: "ap-northeast-1" });
+  <div class="mb-4 space-x-2">
+    <button id="dryRunBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+      ドライラン実行
+    </button>
+    <button id="syncBtn" disabled class="bg-gray-400 text-white font-bold py-2 px-4 rounded cursor-not-allowed">
+      本同期実行
+    </button>
+  </div>
 
-const DEV_BUCKET = process.env.DEV_BUCKET;
-const PROD_BUCKET = process.env.PROD_BUCKET;
-const FROM_EMAIL = process.env.FROM_EMAIL;
-const TO_EMAIL = process.env.TO_EMAIL;
+  <div id="status" class="mb-4 text-sm"></div>
 
-export const handler = async (event) => {
-  const query = event.queryStringParameters || {};
-  const dryRun = query.dryRun === 'true';
-  const exclude = (query.exclude || '').split(',').map(x => x.trim()).filter(Boolean);
+  <div id="tableContainer" class="space-y-6 hidden">
+    <div>
+      <h2 class="font-semibold mb-2 text-blue-700">追加・更新されるファイル</h2>
+      <table class="table-auto w-full border border-collapse">
+        <thead class="bg-gray-200">
+          <tr>
+            <th class="px-4 py-2">キー</th>
+            <th class="px-4 py-2">更新日時</th>
+            <th class="px-4 py-2">サイズ</th>
+          </tr>
+        </thead>
+        <tbody id="copyTableBody" class="bg-white"></tbody>
+      </table>
+    </div>
 
-  const listObjects = async (Bucket) => {
-    let Contents = [];
-    let ContinuationToken;
-    do {
-      const res = await s3.send(new ListObjectsV2Command({ Bucket, ContinuationToken }));
-      Contents = Contents.concat(res.Contents || []);
-      ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
-    } while (ContinuationToken);
-    return Contents;
-  };
+    <div>
+      <h2 class="font-semibold mb-2 text-red-600">削除されるファイル</h2>
+      <table class="table-auto w-full border border-collapse">
+        <thead class="bg-gray-200">
+          <tr>
+            <th class="px-4 py-2">キー</th>
+            <th class="px-4 py-2">更新日時</th>
+            <th class="px-4 py-2">サイズ</th>
+          </tr>
+        </thead>
+        <tbody id="deleteTableBody" class="bg-white"></tbody>
+      </table>
+    </div>
+  </div>
 
-  const devObjects = await listObjects(DEV_BUCKET);
-  const prodObjects = await listObjects(PROD_BUCKET);
+  <script>
+    const dryRunBtn = document.getElementById('dryRunBtn');
+    const syncBtn = document.getElementById('syncBtn');
+    const statusDiv = document.getElementById('status');
+    const tableContainer = document.getElementById('tableContainer');
+    const copyTableBody = document.getElementById('copyTableBody');
+    const deleteTableBody = document.getElementById('deleteTableBody');
 
-  const devMap = {};
-  for (const o of devObjects) {
-    devMap[o.Key] = new Date(o.LastModified);
-  }
+    let lastResult = null;
 
-  const prodMap = {};
-  for (const o of prodObjects) {
-    prodMap[o.Key] = new Date(o.LastModified);
-  }
+    dryRunBtn.onclick = async () => {
+      statusDiv.textContent = 'ドライラン中…';
+      tableContainer.classList.add('hidden');
+      syncBtn.disabled = true;
+      syncBtn.classList.replace('bg-blue-500', 'bg-gray-400');
+      syncBtn.classList.add('cursor-not-allowed');
 
-  const toCopy = devObjects.filter(obj => {
-    if (exclude.some(prefix => obj.Key.startsWith(prefix))) return false;
-    const prodDate = prodMap[obj.Key];
-    return !prodDate || new Date(obj.LastModified) > prodDate;
-  });
+      try {
+        const res = await fetch('/tools/sync?dryRun=true');
+        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
 
-  const toDelete = prodObjects.filter(obj => {
-    if (exclude.some(prefix => obj.Key.startsWith(prefix))) return false;
-    return !devMap[obj.Key];
-  });
+        const data = await res.json();
+        lastResult = data;
 
-  if (dryRun) {
-    return {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      },
-      body: JSON.stringify({
-        filesToCopy: toCopy.map(obj => ({
-          key: obj.Key,
-          lastModified: obj.LastModified,
-          size: obj.Size
-        })),
-        filesToDelete: toDelete.map(obj => ({
-          key: obj.Key,
-          lastModified: obj.LastModified,
-          size: obj.Size
-        }))
-      })
-    };
-  }
+        // 描画
+        copyTableBody.innerHTML = '';
+        deleteTableBody.innerHTML = '';
 
-  // 本同期処理（コピー + 削除）
-  const copyPromises = toCopy.map(obj =>
-    s3.send(new CopyObjectCommand({
-      Bucket: PROD_BUCKET,
-      CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
-      Key: obj.Key
-    }))
-  );
-
-  const deletePromises = toDelete.map(obj =>
-    s3.send(new DeleteObjectCommand({
-      Bucket: PROD_BUCKET,
-      Key: obj.Key
-    }))
-  );
-
-  await Promise.all([...copyPromises, ...deletePromises]);
-
-  // メール送信
-  if (TO_EMAIL && FROM_EMAIL && (toCopy.length > 0 || toDelete.length > 0)) {
-    const subject = `S3同期完了 - コピー: ${toCopy.length} 件 / 削除: ${toDelete.length} 件`;
-
-    const bodyText = [
-      '以下のファイルが同期処理されました。',
-      '',
-      `▼コピー（追加/更新）: ${toCopy.length} 件`,
-      ...toCopy.map(f => `・${f.Key}`),
-      '',
-      `▼削除: ${toDelete.length} 件`,
-      ...toDelete.map(f => `・${f.Key}`)
-    ].join('\n');
-
-    try {
-      await ses.send(new SendEmailCommand({
-        Source: FROM_EMAIL,
-        Destination: { ToAddresses: [TO_EMAIL] },
-        Message: {
-          Subject: { Data: subject },
-          Body: { Text: { Data: bodyText } }
+        for (const f of data.filesToCopy || []) {
+          const row = `<tr>
+            <td class="border px-2 py-1">${f.key}</td>
+            <td class="border px-2 py-1">${new Date(f.lastModified).toLocaleString()}</td>
+            <td class="border px-2 py-1">${f.size}</td>
+          </tr>`;
+          copyTableBody.insertAdjacentHTML('beforeend', row);
         }
-      }));
-    } catch (emailErr) {
-      console.error('メール送信エラー:', emailErr);
-    }
-  }
 
-  return {
-    statusCode: 200,
-    headers: { 'Access-Control-Allow-Origin': '*' },
-    body: JSON.stringify({
-      syncCount: toCopy.length,
-      deleteCount: toDelete.length
-    })
-  };
-};
+        for (const f of data.filesToDelete || []) {
+          const row = `<tr>
+            <td class="border px-2 py-1">${f.key}</td>
+            <td class="border px-2 py-1">${new Date(f.lastModified).toLocaleString()}</td>
+            <td class="border px-2 py-1">${f.size}</td>
+          </tr>`;
+          deleteTableBody.insertAdjacentHTML('beforeend', row);
+        }
 
+        const copyCount = data.filesToCopy?.length || 0;
+        const deleteCount = data.filesToDelete?.length || 0;
+        statusDiv.textContent = `追加・更新: ${copyCount} 件 / 削除: ${deleteCount} 件`;
+        tableContainer.classList.remove('hidden');
 
+        if (copyCount > 0 || deleteCount > 0) {
+          syncBtn.disabled = false;
+          syncBtn.classList.replace('bg-gray-400', 'bg-blue-500');
+          syncBtn.classList.remove('cursor-not-allowed');
+        }
+      } catch (e) {
+        statusDiv.textContent = `ドライラン失敗: ${e.message}`;
+      }
+    };
 
+    syncBtn.onclick = async () => {
+      if (!lastResult) {
+        alert('まずドライランを実行してください。');
+        return;
+      }
+      if (!confirm('本同期を実行しますか？')) return;
 
+      statusDiv.textContent = '同期中…';
+      syncBtn.disabled = true;
+      dryRunBtn.disabled = true;
+
+      try {
+        const res = await fetch('/tools/sync', { method: 'POST' });
+        const data = await res.json();
+        statusDiv.textContent = `同期完了。コピー: ${data.syncCount} 件、削除: ${data.deleteCount} 件`;
+
+        tableContainer.classList.add('hidden');
+        syncBtn.disabled = true;
+        syncBtn.classList.replace('bg-blue-500', 'bg-gray-400');
+        syncBtn.classList.add('cursor-not-allowed');
+      } catch (e) {
+        statusDiv.textContent = `同期失敗: ${e.message}`;
+      } finally {
+        dryRunBtn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
 
 
 
