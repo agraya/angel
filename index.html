@@ -1,149 +1,111 @@
-exports.handler = async () => {
-  const html = `
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <title>S3 同期管理画面</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-800 p-6">
-  <h1 class="text-2xl font-bold mb-4">S3 バケット同期ツール</h1>
+// lambda.mjs (Node.js 22, ES Modules)
+import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-  <div class="mb-4 space-x-2">
-    <button id="dryRunBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
-      ドライラン実行
-    </button>
-    <button id="syncBtn" disabled class="bg-gray-400 text-white font-bold py-2 px-4 rounded cursor-not-allowed">
-      本同期実行
-    </button>
-  </div>
+const s3 = new S3Client({});
+const ses = new SESClient({ region: "ap-northeast-1" });
 
-  <div id="status" class="mb-4 text-sm"></div>
+const DEV_BUCKET = process.env.DEV_BUCKET;
+const PROD_BUCKET = process.env.PROD_BUCKET;
+const FROM_EMAIL = process.env.FROM_EMAIL;
+const TO_EMAIL = process.env.TO_EMAIL;
 
-  <div id="tableContainer" class="space-y-6 hidden">
-    <div>
-      <h2 class="font-semibold mb-2 text-blue-700">追加・更新されるファイル</h2>
-      <table class="table-auto w-full border border-collapse">
-        <thead class="bg-gray-200">
-          <tr>
-            <th class="px-4 py-2">キー</th>
-            <th class="px-4 py-2">更新日時</th>
-            <th class="px-4 py-2">サイズ</th>
-          </tr>
-        </thead>
-        <tbody id="copyTableBody" class="bg-white"></tbody>
-      </table>
-    </div>
+export const handler = async (event) => {
+  try {
+    const method = event.requestContext.http.method;
+    const isDryRun = event.rawQueryString?.includes("dryRun=true");
 
-    <div>
-      <h2 class="font-semibold mb-2 text-red-600">削除されるファイル</h2>
-      <table class="table-auto w-full border border-collapse">
-        <thead class="bg-gray-200">
-          <tr>
-            <th class="px-4 py-2">キー</th>
-            <th class="px-4 py-2">更新日時</th>
-            <th class="px-4 py-2">サイズ</th>
-          </tr>
-        </thead>
-        <tbody id="deleteTableBody" class="bg-white"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <script>
-    const dryRunBtn = document.getElementById("dryRunBtn");
-    const syncBtn = document.getElementById("syncBtn");
-    const statusDiv = document.getElementById("status");
-    const tableContainer = document.getElementById("tableContainer");
-    const copyTableBody = document.getElementById("copyTableBody");
-    const deleteTableBody = document.getElementById("deleteTableBody");
-
-    let lastResult = null;
-
-    dryRunBtn.onclick = async () => {
-      statusDiv.textContent = "ドライラン中…";
-      tableContainer.classList.add("hidden");
-      syncBtn.disabled = true;
-      syncBtn.classList.replace("bg-blue-500", "bg-gray-400");
-      syncBtn.classList.add("cursor-not-allowed");
-
-      try {
-        const res = await fetch("/tools/sync?dryRun=true");
-        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
-        const data = await res.json();
-        lastResult = data;
-
-        copyTableBody.innerHTML = "";
-        deleteTableBody.innerHTML = "";
-
-        for (const f of data.filesToCopy || []) {
-          const row = \`<tr>
-            <td class="border px-2 py-1">\${f.key}</td>
-            <td class="border px-2 py-1">\${new Date(f.lastModified).toLocaleString()}</td>
-            <td class="border px-2 py-1">\${f.size}</td>
-          </tr>\`;
-          copyTableBody.insertAdjacentHTML("beforeend", row);
-        }
-
-        for (const f of data.filesToDelete || []) {
-          const row = \`<tr>
-            <td class="border px-2 py-1">\${f.key}</td>
-            <td class="border px-2 py-1">\${new Date(f.lastModified).toLocaleString()}</td>
-            <td class="border px-2 py-1">\${f.size}</td>
-          </tr>\`;
-          deleteTableBody.insertAdjacentHTML("beforeend", row);
-        }
-
-        statusDiv.textContent = \`同期対象: \${(data.filesToCopy?.length || 0)} 件、削除対象: \${(data.filesToDelete?.length || 0)} 件\`;
-        tableContainer.classList.remove("hidden");
-
-        if ((data.filesToCopy?.length || 0) > 0 || (data.filesToDelete?.length || 0) > 0) {
-          syncBtn.disabled = false;
-          syncBtn.classList.replace("bg-gray-400", "bg-blue-500");
-          syncBtn.classList.remove("cursor-not-allowed");
-        }
-      } catch (e) {
-        statusDiv.textContent = "ドライランに失敗しました: " + e.message;
-      }
+    const listAllObjects = async (bucket) => {
+      let all = [], token;
+      do {
+        const res = await s3.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: token }));
+        all.push(...(res.Contents || []));
+        token = res.IsTruncated ? res.NextContinuationToken : undefined;
+      } while (token);
+      return all;
     };
 
-    syncBtn.onclick = async () => {
-      if (!lastResult) {
-        alert("まずドライランを実行してください。");
-        return;
-      }
-      if (!confirm("本同期を実行しますか？")) return;
+    const devObjects = await listAllObjects(DEV_BUCKET);
+    const prodObjects = await listAllObjects(PROD_BUCKET);
+    const prodMap = Object.fromEntries(prodObjects.map(o => [o.Key, new Date(o.LastModified)]));
 
-      statusDiv.textContent = "同期中…";
-      syncBtn.disabled = true;
-      dryRunBtn.disabled = true;
+    const toCopy = devObjects.filter(obj => {
+      const prodDate = prodMap[obj.Key];
+      return !prodDate || new Date(obj.LastModified) > prodDate;
+    });
 
-      try {
-        const res = await fetch("/tools/sync", { method: "POST" });
-        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
-        const data = await res.json();
-        statusDiv.textContent = \`同期完了。コピー: \${data.syncCount} 件、削除: \${data.deleteCount || 0} 件\`;
-        tableContainer.classList.add("hidden");
-      } catch (e) {
-        statusDiv.textContent = "同期に失敗しました: " + e.message;
-      } finally {
-        dryRunBtn.disabled = false;
+    const devKeys = new Set(devObjects.map(o => o.Key));
+    const toDelete = prodObjects.filter(o => !devKeys.has(o.Key));
+
+    if (isDryRun) {
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify({
+          filesToCopy: toCopy.map(f => ({ key: f.Key, lastModified: f.LastModified, size: f.Size })),
+          filesToDelete: toDelete.map(f => ({ key: f.Key, lastModified: f.LastModified, size: f.Size }))
+        })
+      };
+    }
+
+    if (method === "POST") {
+      // 同期実行
+      await Promise.all([
+        ...toCopy.map(obj => s3.send(new CopyObjectCommand({
+          Bucket: PROD_BUCKET,
+          CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
+          Key: obj.Key,
+        }))),
+        ...toDelete.map(obj => s3.send(new DeleteObjectCommand({
+          Bucket: PROD_BUCKET,
+          Key: obj.Key,
+        }))),
+      ]);
+
+      // メール送信
+      if (FROM_EMAIL && TO_EMAIL) {
+        const subject = `S3同期完了 - コピー: ${toCopy.length}件、削除: ${toDelete.length}件`;
+        const body = `同期されたファイル一覧:\n\n[コピーされたファイル]\n${toCopy.map(f => f.Key).join('\n')}\n\n[削除されたファイル]\n${toDelete.map(f => f.Key).join('\n')}`;
+        await ses.send(new SendEmailCommand({
+          Source: FROM_EMAIL,
+          Destination: { ToAddresses: [TO_EMAIL] },
+          Message: {
+            Subject: { Data: subject },
+            Body: { Text: { Data: body } }
+          }
+        }));
       }
+
+      return {
+        statusCode: 200,
+        headers: corsHeaders(),
+        body: JSON.stringify({
+          syncCount: toCopy.length,
+          deleteCount: toDelete.length
+        })
+      };
+    }
+
+    return {
+      statusCode: 405,
+      headers: corsHeaders(),
+      body: JSON.stringify({ error: "Method Not Allowed" })
     };
-  </script>
-</body>
-</html>
-  `;
-
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'text/html' },
-    body: html
-  };
+  } catch (err) {
+    console.error("同期エラー:", err);
+    return {
+      statusCode: 500,
+      headers: corsHeaders(),
+      body: JSON.stringify({ error: err.message })
+    };
+  }
 };
 
-
+const corsHeaders = () => ({
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type'
+});
 
 
 
