@@ -1,8 +1,10 @@
+exports.handler = async () => {
+  const html = `
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>S3 バケット同期ツール</title>
+  <meta charset="UTF-8" />
+  <title>S3 同期管理画面</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 p-6">
@@ -50,88 +52,81 @@
   </div>
 
   <script>
-    const dryRunBtn = document.getElementById('dryRunBtn');
-    const syncBtn = document.getElementById('syncBtn');
-    const statusDiv = document.getElementById('status');
-    const tableContainer = document.getElementById('tableContainer');
-    const copyTableBody = document.getElementById('copyTableBody');
-    const deleteTableBody = document.getElementById('deleteTableBody');
+    const dryRunBtn = document.getElementById("dryRunBtn");
+    const syncBtn = document.getElementById("syncBtn");
+    const statusDiv = document.getElementById("status");
+    const tableContainer = document.getElementById("tableContainer");
+    const copyTableBody = document.getElementById("copyTableBody");
+    const deleteTableBody = document.getElementById("deleteTableBody");
 
     let lastResult = null;
 
     dryRunBtn.onclick = async () => {
-      statusDiv.textContent = 'ドライラン中…';
-      tableContainer.classList.add('hidden');
+      statusDiv.textContent = "ドライラン中…";
+      tableContainer.classList.add("hidden");
       syncBtn.disabled = true;
-      syncBtn.classList.replace('bg-blue-500', 'bg-gray-400');
-      syncBtn.classList.add('cursor-not-allowed');
+      syncBtn.classList.replace("bg-blue-500", "bg-gray-400");
+      syncBtn.classList.add("cursor-not-allowed");
 
       try {
-        const res = await fetch('/tools/sync?dryRun=true');
-        if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
-
+        const res = await fetch("/tools/sync?dryRun=true");
+        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
         const data = await res.json();
         lastResult = data;
 
-        // 描画
-        copyTableBody.innerHTML = '';
-        deleteTableBody.innerHTML = '';
+        copyTableBody.innerHTML = "";
+        deleteTableBody.innerHTML = "";
 
         for (const f of data.filesToCopy || []) {
-          const row = `<tr>
-            <td class="border px-2 py-1">${f.key}</td>
-            <td class="border px-2 py-1">${new Date(f.lastModified).toLocaleString()}</td>
-            <td class="border px-2 py-1">${f.size}</td>
-          </tr>`;
-          copyTableBody.insertAdjacentHTML('beforeend', row);
+          const row = \`<tr>
+            <td class="border px-2 py-1">\${f.key}</td>
+            <td class="border px-2 py-1">\${new Date(f.lastModified).toLocaleString()}</td>
+            <td class="border px-2 py-1">\${f.size}</td>
+          </tr>\`;
+          copyTableBody.insertAdjacentHTML("beforeend", row);
         }
 
         for (const f of data.filesToDelete || []) {
-          const row = `<tr>
-            <td class="border px-2 py-1">${f.key}</td>
-            <td class="border px-2 py-1">${new Date(f.lastModified).toLocaleString()}</td>
-            <td class="border px-2 py-1">${f.size}</td>
-          </tr>`;
-          deleteTableBody.insertAdjacentHTML('beforeend', row);
+          const row = \`<tr>
+            <td class="border px-2 py-1">\${f.key}</td>
+            <td class="border px-2 py-1">\${new Date(f.lastModified).toLocaleString()}</td>
+            <td class="border px-2 py-1">\${f.size}</td>
+          </tr>\`;
+          deleteTableBody.insertAdjacentHTML("beforeend", row);
         }
 
-        const copyCount = data.filesToCopy?.length || 0;
-        const deleteCount = data.filesToDelete?.length || 0;
-        statusDiv.textContent = `追加・更新: ${copyCount} 件 / 削除: ${deleteCount} 件`;
-        tableContainer.classList.remove('hidden');
+        statusDiv.textContent = \`同期対象: \${(data.filesToCopy?.length || 0)} 件、削除対象: \${(data.filesToDelete?.length || 0)} 件\`;
+        tableContainer.classList.remove("hidden");
 
-        if (copyCount > 0 || deleteCount > 0) {
+        if ((data.filesToCopy?.length || 0) > 0 || (data.filesToDelete?.length || 0) > 0) {
           syncBtn.disabled = false;
-          syncBtn.classList.replace('bg-gray-400', 'bg-blue-500');
-          syncBtn.classList.remove('cursor-not-allowed');
+          syncBtn.classList.replace("bg-gray-400", "bg-blue-500");
+          syncBtn.classList.remove("cursor-not-allowed");
         }
       } catch (e) {
-        statusDiv.textContent = `ドライラン失敗: ${e.message}`;
+        statusDiv.textContent = "ドライランに失敗しました: " + e.message;
       }
     };
 
     syncBtn.onclick = async () => {
       if (!lastResult) {
-        alert('まずドライランを実行してください。');
+        alert("まずドライランを実行してください。");
         return;
       }
-      if (!confirm('本同期を実行しますか？')) return;
+      if (!confirm("本同期を実行しますか？")) return;
 
-      statusDiv.textContent = '同期中…';
+      statusDiv.textContent = "同期中…";
       syncBtn.disabled = true;
       dryRunBtn.disabled = true;
 
       try {
-        const res = await fetch('/tools/sync', { method: 'POST' });
+        const res = await fetch("/tools/sync", { method: "POST" });
+        if (!res.ok) throw new Error(\`APIエラー: \${res.status}\`);
         const data = await res.json();
-        statusDiv.textContent = `同期完了。コピー: ${data.syncCount} 件、削除: ${data.deleteCount} 件`;
-
-        tableContainer.classList.add('hidden');
-        syncBtn.disabled = true;
-        syncBtn.classList.replace('bg-blue-500', 'bg-gray-400');
-        syncBtn.classList.add('cursor-not-allowed');
+        statusDiv.textContent = \`同期完了。コピー: \${data.syncCount} 件、削除: \${data.deleteCount || 0} 件\`;
+        tableContainer.classList.add("hidden");
       } catch (e) {
-        statusDiv.textContent = `同期失敗: ${e.message}`;
+        statusDiv.textContent = "同期に失敗しました: " + e.message;
       } finally {
         dryRunBtn.disabled = false;
       }
@@ -139,11 +134,14 @@
   </script>
 </body>
 </html>
+  `;
 
-
-
-
-
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'text/html' },
+    body: html
+  };
+};
 
 
 
