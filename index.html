@@ -1,86 +1,130 @@
-const { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const s3 = new S3Client({ region: 'ap-northeast-1' });
+import { S3Client, ListObjectsV2Command, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+
+const s3 = new S3Client({});
+const ses = new SESClient({ region: "ap-northeast-1" });
 
 const DEV_BUCKET = process.env.DEV_BUCKET;
 const PROD_BUCKET = process.env.PROD_BUCKET;
+const FROM_EMAIL = process.env.FROM_EMAIL;
+const TO_EMAIL = process.env.TO_EMAIL;
 
-exports.handler = async (event) => {
-  const method = event.httpMethod;
-  const isDryRun = event.queryStringParameters?.dryRun === 'true';
+export const handler = async (event) => {
+  const query = event.queryStringParameters || {};
+  const dryRun = query.dryRun === 'true';
+  const exclude = (query.exclude || '').split(',').map(x => x.trim()).filter(Boolean);
 
-  const devRes = await s3.send(new ListObjectsV2Command({ Bucket: DEV_BUCKET }));
-  const prodRes = await s3.send(new ListObjectsV2Command({ Bucket: PROD_BUCKET }));
+  const listObjects = async (Bucket) => {
+    let Contents = [];
+    let ContinuationToken;
+    do {
+      const res = await s3.send(new ListObjectsV2Command({ Bucket, ContinuationToken }));
+      Contents = Contents.concat(res.Contents || []);
+      ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+    return Contents;
+  };
 
-  const devMap = new Map((devRes.Contents || []).map(obj => [obj.Key, obj]));
-  const prodMap = new Map((prodRes.Contents || []).map(obj => [obj.Key, obj]));
+  const devObjects = await listObjects(DEV_BUCKET);
+  const prodObjects = await listObjects(PROD_BUCKET);
 
-  const toAddOrUpdate = [];
-  const toDelete = [];
-
-  // 差分追加/更新
-  for (const [key, devObj] of devMap) {
-    const prodObj = prodMap.get(key);
-    if (!prodObj || new Date(devObj.LastModified) > new Date(prodObj.LastModified)) {
-      toAddOrUpdate.push({
-        Key: key,
-        Size: devObj.Size,
-        LastModified: devObj.LastModified,
-      });
-    }
+  const devMap = {};
+  for (const o of devObjects) {
+    devMap[o.Key] = new Date(o.LastModified);
   }
 
-  // 削除差分
-  for (const [key, prodObj] of prodMap) {
-    if (!devMap.has(key)) {
-      toDelete.push({
-        Key: key,
-        Size: prodObj.Size,
-        LastModified: prodObj.LastModified,
-      });
-    }
+  const prodMap = {};
+  for (const o of prodObjects) {
+    prodMap[o.Key] = new Date(o.LastModified);
   }
 
-  if (method === 'GET' && isDryRun) {
+  const toCopy = devObjects.filter(obj => {
+    if (exclude.some(prefix => obj.Key.startsWith(prefix))) return false;
+    const prodDate = prodMap[obj.Key];
+    return !prodDate || new Date(obj.LastModified) > prodDate;
+  });
+
+  const toDelete = prodObjects.filter(obj => {
+    if (exclude.some(prefix => obj.Key.startsWith(prefix))) return false;
+    return !devMap[obj.Key];
+  });
+
+  if (dryRun) {
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      },
       body: JSON.stringify({
-        addOrUpdate: toAddOrUpdate,
-        toDelete: toDelete,
-      }),
+        filesToCopy: toCopy.map(obj => ({
+          key: obj.Key,
+          lastModified: obj.LastModified,
+          size: obj.Size
+        })),
+        filesToDelete: toDelete.map(obj => ({
+          key: obj.Key,
+          lastModified: obj.LastModified,
+          size: obj.Size
+        }))
+      })
     };
   }
 
-  if (method === 'POST') {
-    await Promise.all([
-      ...toAddOrUpdate.map(obj =>
-        s3.send(new CopyObjectCommand({
-          Bucket: PROD_BUCKET,
-          CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
-          Key: obj.Key,
-        }))
-      ),
-      ...toDelete.map(obj =>
-        s3.send(new DeleteObjectCommand({
-          Bucket: PROD_BUCKET,
-          Key: obj.Key,
-        }))
-      ),
-    ]);
+  // 本同期処理（コピー + 削除）
+  const copyPromises = toCopy.map(obj =>
+    s3.send(new CopyObjectCommand({
+      Bucket: PROD_BUCKET,
+      CopySource: `${DEV_BUCKET}/${encodeURIComponent(obj.Key)}`,
+      Key: obj.Key
+    }))
+  );
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({
-        copied: toAddOrUpdate.length,
-        deleted: toDelete.length,
-      }),
-    };
+  const deletePromises = toDelete.map(obj =>
+    s3.send(new DeleteObjectCommand({
+      Bucket: PROD_BUCKET,
+      Key: obj.Key
+    }))
+  );
+
+  await Promise.all([...copyPromises, ...deletePromises]);
+
+  // メール送信
+  if (TO_EMAIL && FROM_EMAIL && (toCopy.length > 0 || toDelete.length > 0)) {
+    const subject = `S3同期完了 - コピー: ${toCopy.length} 件 / 削除: ${toDelete.length} 件`;
+
+    const bodyText = [
+      '以下のファイルが同期処理されました。',
+      '',
+      `▼コピー（追加/更新）: ${toCopy.length} 件`,
+      ...toCopy.map(f => `・${f.Key}`),
+      '',
+      `▼削除: ${toDelete.length} 件`,
+      ...toDelete.map(f => `・${f.Key}`)
+    ].join('\n');
+
+    try {
+      await ses.send(new SendEmailCommand({
+        Source: FROM_EMAIL,
+        Destination: { ToAddresses: [TO_EMAIL] },
+        Message: {
+          Subject: { Data: subject },
+          Body: { Text: { Data: bodyText } }
+        }
+      }));
+    } catch (emailErr) {
+      console.error('メール送信エラー:', emailErr);
+    }
   }
 
   return {
-    statusCode: 405,
-    body: 'Method Not Allowed',
+    statusCode: 200,
+    headers: { 'Access-Control-Allow-Origin': '*' },
+    body: JSON.stringify({
+      syncCount: toCopy.length,
+      deleteCount: toDelete.length
+    })
   };
 };
 
