@@ -1,3 +1,55 @@
+'use strict';
+
+exports.handler = async (event, context, callback) => {
+  const request = event.Records[0].cf.request;
+  const hostHeader = request.headers.host[0].value;
+  const uri = request.uri;
+
+  // === ドメインリダイレクト設定 ===
+  // 必要に応じて複数パターン登録可能
+  const domainRedirects = {
+    "www.example.com": "example.com",
+    "example.net": "www.example.net",
+    // "元ドメイン": "リダイレクト先ドメイン"
+  };
+
+  if (domainRedirects[hostHeader]) {
+    return callback(null, {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        'location': [{
+          key: 'Location',
+          value: `https://${domainRedirects[hostHeader]}${request.uri}`
+        }],
+      },
+    });
+  }
+
+  // === index.html の内部解決 ===
+  // ディレクトリ (末尾が / ) の場合
+  if (uri.endsWith('/')) {
+    request.uri += 'index.html';
+  }
+  // 拡張子なしのパスの場合 (例: /about → /about/index.html)
+  else if (!uri.includes('.')) {
+    request.uri += '/index.html';
+  }
+
+  return callback(null, request);
+};
+
+
+
+
+
+
+
+
+
+
+
+
 export const handler = async (event) => {
   const request = event.Records[0].cf.request;
   let uri = request.uri;
