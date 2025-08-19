@@ -6,6 +6,86 @@ export const handler = async (event) => {
   const host = headers.host[0].value;
 
   // === 設定値 ===
+  const redirectFrom = "www.example.com";
+  const redirectTo   = "example.com";
+
+  // ドメインリダイレクト
+  if (host === redirectFrom) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: `https://${redirectTo}${uri}`,
+        }],
+      },
+    };
+  }
+
+  // /path/index.html → /path
+  if (uri.endsWith('/index.html')) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: uri.replace(/\/index\.html$/, ''),
+        }],
+      },
+    };
+  }
+
+  // /path/ → /path
+  if (uri !== '/' && uri.endsWith('/')) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: uri.slice(0, -1),
+        }],
+      },
+    };
+  }
+
+  // /path → 実体は /path/index.html
+  if (!uri.includes('.') && !uri.endsWith('/')) {
+    request.uri = `${uri}/index.html`;
+  }
+
+  return request;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const handler = async (event) => {
+  const request = event.Records[0].cf.request;
+  let uri = request.uri;
+
+  const headers = request.headers;
+  const host = headers.host[0].value;
+
+  // === 設定値 ===
   const redirectFrom = "www.example.com";  // リダイレクト元
   const redirectTo   = "example.com";      // リダイレクト先
 
