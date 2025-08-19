@@ -2,6 +2,26 @@
 
 export const handler = async (event) => {
   const request = event.Records[0].cf.request;
+  let uri = request.uri;
+
+  // /path/ → /path/index.html
+  if (uri.endsWith('/')) {
+    request.uri = `${uri}index.html`;
+  }
+  // /path → /path/index.html
+  else if (!uri.includes('.')) {
+    request.uri = `${uri}/index.html`;
+  }
+
+  return request;
+};
+
+
+
+'use strict';
+
+export const handler = async (event) => {
+  const request = event.Records[0].cf.request;
   const headers = request.headers;
   const host = headers.host[0].value;
   let uri = request.uri;
