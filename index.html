@@ -2,6 +2,78 @@
 
 export const handler = async (event) => {
   const request = event.Records[0].cf.request;
+  const headers = request.headers;
+  const host = headers.host[0].value;
+  const uri = request.uri;
+
+  // ===== 設定例 =====
+  const domainRedirects = {
+    // ドメイン単位のリダイレクト
+    "www.example.com": "example.com",
+    "old.example.net": "example.net",
+
+    // ドメイン + パス単位のリダイレクト
+    "example.com/oldpath": "example.com/newpath",
+    "example.net/legacy": "example.net/",
+  };
+
+  // 1. まず「ドメイン + パス」完全一致を確認
+  const fullKey = `${host}${uri}`;
+  if (domainRedirects[fullKey]) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: `https://${domainRedirects[fullKey]}`,
+        }],
+      },
+    };
+  }
+
+  // 2. ドメイン単位だけでの一致を確認
+  if (domainRedirects[host]) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: `https://${domainRedirects[host]}${uri}`,
+        }],
+      },
+    };
+  }
+
+  // 3. どれにも当てはまらなければそのまま通す
+  return request;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'use strict';
+
+export const handler = async (event) => {
+  const request = event.Records[0].cf.request;
   let uri = request.uri;
 
   // /path/ → /path/index.html
