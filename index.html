@@ -4,6 +4,113 @@ export const handler = async (event) => {
   const request = event.Records[0].cf.request;
   const headers = request.headers;
   const host = headers.host[0].value;
+  let uri = request.uri;
+
+  // ======================
+  // 設定例
+  // ======================
+  // ドメインごとのリダイレクト先
+  const domainRedirects = {
+    "www.example.com": "example.com",
+    "old.example.net": "example.net",
+  };
+
+  // パスごとのリダイレクト設定
+  // 例: /old → /new, /service → /products
+  const pathRedirects = {
+    "/old": "/new",
+    "/service": "/products",
+  };
+
+  // スラッシュの統一ルール
+  // true = / ありに統一
+  // false = / なしに統一
+  const forceTrailingSlash = true;
+
+  // ======================
+  // 処理開始
+  // ======================
+
+  // --- ドメインリダイレクト ---
+  if (domainRedirects[host]) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: `https://${domainRedirects[host]}${uri}`,
+        }],
+      },
+    };
+  }
+
+  // --- パスごとのリダイレクト ---
+  if (pathRedirects[uri]) {
+    return {
+      status: '301',
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: [{
+          key: 'Location',
+          value: `https://${host}${pathRedirects[uri]}`,
+        }],
+      },
+    };
+  }
+
+  // --- スラッシュ統一処理 ---
+  if (forceTrailingSlash) {
+    // / ありに統一
+    if (!uri.endsWith('/')) {
+      return {
+        status: '301',
+        statusDescription: 'Moved Permanently',
+        headers: {
+          location: [{
+            key: 'Location',
+            value: `https://${host}${uri}/`,
+          }],
+        },
+      };
+    }
+  } else {
+    // / なしに統一（ただし / 自体は除外）
+    if (uri !== '/' && uri.endsWith('/')) {
+      return {
+        status: '301',
+        statusDescription: 'Moved Permanently',
+        headers: {
+          location: [{
+            key: 'Location',
+            value: `https://${host}${uri.slice(0, -1)}`,
+          }],
+        },
+      };
+    }
+  }
+
+  // --- 何も該当しなければそのまま通す ---
+  return request;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+'use strict';
+
+export const handler = async (event) => {
+  const request = event.Records[0].cf.request;
+  const headers = request.headers;
+  const host = headers.host[0].value;
   const uri = request.uri;
 
   // ===== 設定例 =====
