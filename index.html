@@ -1,3 +1,33 @@
+# 1. リポジトリRPMをダウンロード
+sudo dnf install -y https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+
+# 2. MySQL 8.4 リポジトリが有効になっているので無効化
+sudo dnf config-manager --disable mysql80-community
+sudo dnf config-manager --disable mysql84-community
+
+# 3. 8.1 のリポジトリを有効化
+sudo dnf config-manager --enable mysql81-community
+
+# 4. MySQL 8.1 をインストール
+sudo dnf install -y mysql-community-server
+
+# 5. サービス起動
+sudo systemctl enable --now mysqld
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 'use strict';
 
 export const handler = async (event) => {
