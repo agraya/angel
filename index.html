@@ -13,7 +13,7 @@ done
 
 aws ec2 describe-snapshots \
   --owner-ids self \
-  --query 'length(sort_by(Snapshots[?!contains(Description, `i-aaa111`) && !contains(Description, `i-bbb222`)], &Description)[])' \
+  --query 'length(sort_by(Snapshots[?!contains(Description, `i-aaa111`) && !contains(Description, `i-bbb222`) && !contains(Description, `i-ccc333`) && !contains(Description, `i-ddd444`)], &Description)[])' \
   --output json
 
 
