@@ -1,3 +1,18 @@
+SNAPSHOTS=$(aws ec2 describe-snapshots \
+  --owner-ids self \
+  --query "sort_by(Snapshots[?!contains(Description, 'i-aaa111') && !contains(Description, 'i-bbb222')], &Description)[].SnapshotId" \
+  --output text)
+
+for SNAP_ID in $SNAPSHOTS; do
+  echo "Deleting $SNAP_ID"
+  # 実行するなら下を有効化
+  # aws ec2 delete-snapshot --snapshot-id "$SNAP_ID"
+done
+
+
+
+
+
 # 1. リポジトリRPMをダウンロード
 sudo dnf install -y https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
 
