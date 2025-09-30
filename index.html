@@ -11,6 +11,11 @@ done
 
 
 
+aws ec2 describe-snapshots \
+  --owner-ids self \
+  --query 'length(sort_by(Snapshots[?!contains(Description, `i-aaa111`) && !contains(Description, `i-bbb222`)], &Description)[])' \
+  --output json
+
 
 
 # 1. リポジトリRPMをダウンロード
