@@ -1,3 +1,8 @@
+awk '$1=="192.168.0.10" && $4>="[15/Oct/2025:10:00" && $4<="[15/Oct/2025:11:00"' /var/log/httpd/access_log \
+| awk '{gsub("\\[","",$4); split($4,a,":"); print a[1]":"a[2]":"a[3]}' \
+| cut -c 1-17 | sort | uniq -c
+
+
 SNAPSHOTS=$(aws ec2 describe-snapshots \
   --owner-ids self \
   --query 'sort_by(Snapshots[?!contains(Description, `i-aaa111`) && !contains(Description, `i-bbb222`) && !contains(Description, `i-ccc333`) && !contains(Description, `i-ddd444`)], &Description)[].SnapshotId' \
