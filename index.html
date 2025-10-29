@@ -1,3 +1,19 @@
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=UpdateIPSet \
+  --max-results 50 \
+  --query "Events[?contains(CloudTrailEvent, '203.0.113.45')].[EventTime, EventName, Username, CloudTrailEvent]" \
+  --output table
+
+
+
+
+
+
+
+
+
+
+
 awk '$1=="192.168.0.10" && $4>="[15/Oct/2025:10:00" && $4<="[15/Oct/2025:11:00"' /var/log/httpd/access_log \
 | awk '{gsub("\\[","",$4); split($4,a,":"); print a[1]":"a[2]":"a[3]}' \
 | cut -c 1-17 | sort | uniq -c
