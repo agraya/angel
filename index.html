@@ -1,10 +1,7 @@
 aws cloudtrail lookup-events \
   --lookup-attributes AttributeKey=EventName,AttributeValue=UpdateIPSet \
-  --max-results 50 \
-  --query "Events[?contains(CloudTrailEvent, '203.0.113.45')].[EventTime, EventName, Username, CloudTrailEvent]" \
+  --query "Events[?contains(CloudTrailEvent, '203.0.113.45')].[EventTime, Username]" \
   --output table
-
-
 
 
 
