@@ -5,7 +5,7 @@ aws cloudtrail lookup-events \
 
 
 
-
+| awk '!/^#/ { split($2,t,":"); print $1" "t[1] }' | sort | uniq -c
 
 
 
