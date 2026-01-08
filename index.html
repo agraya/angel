@@ -5,6 +5,8 @@ aws cloudtrail lookup-events \
 
 
 
+perl -MImage::Magick -e 'print $Image::Magick::VERSION'
+
 | awk '!/^#/ { split($2,t,":"); print $1" "t[1] }' | sort | uniq -c
 
 awk '!/^#/ && $1=="2026-01-06" { split($2,t,":"); if (t[1]>=10 && t[1]<=12) c++ } END{print c}'
