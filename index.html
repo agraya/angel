@@ -17,7 +17,7 @@ systemctl restart httpd
 run libtool --finish /usr/local/lib
 
 strace -f -o /tmp/estcmd.strace estcmd put testdb test.txt
-  
+  grep -n -E "mmap|iconv|open|ftruncate|flock" /tmp/estcmd.strace
   cd hyperestraier-*/perl
 perl Makefile.PL
   SetEnv LD_LIBRARY_PATH /usr/local/lib
