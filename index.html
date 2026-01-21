@@ -17,6 +17,7 @@ systemctl restart httpd
 run libtool --finish /usr/local/lib
 
   SetEnv LD_LIBRARY_PATH /usr/local/lib
+echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf
   
 awk '$1=="192.168.0.10" && $4>="[15/Oct/2025:10:00" && $4<="[15/Oct/2025:11:00"' /var/log/httpd/access_log \
 | awk '{gsub("\\[","",$4); split($4,a,":"); print a[1]":"a[2]":"a[3]}' \
