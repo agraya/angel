@@ -16,6 +16,8 @@ perl -e 'use Encode; print "ok\n";'
 systemctl restart httpd
 run libtool --finish /usr/local/lib
 
+  cd hyperestraier-*/perl
+perl Makefile.PL
   SetEnv LD_LIBRARY_PATH /usr/local/lib
 echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf
   echo '#include <iconv.h>' | gcc -x c - -o /tmp/iconvtest
