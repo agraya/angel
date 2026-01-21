@@ -16,6 +16,8 @@ perl -e 'use Encode; print "ok\n";'
 systemctl restart httpd
 run libtool --finish /usr/local/lib
 
+strace -f -o /tmp/estcmd.strace estcmd put testdb test.txt
+  
   cd hyperestraier-*/perl
 perl Makefile.PL
   SetEnv LD_LIBRARY_PATH /usr/local/lib
